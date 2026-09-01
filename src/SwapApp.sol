@@ -8,20 +8,38 @@ import "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol"
 contract SwapApp {
     using SafeERC20 for IERC20;
 
+    address public USDT;
+    address public DAI;
     address public V2Router02Address;
 
     event SwapTokens(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut);
+    event AddLiquidity(address token0, address token1, uint256 lpTokenAmount);
 
-    constructor(address V2Router02Address_) {
+    constructor(address V2Router02Address_, address USDT_, address DAI_) {
         V2Router02Address = V2Router02Address_;
+        USDT = USDT_;
+        DAI = DAI_;
     }
 
-    function swapTokens(uint256 amountIn_, uint256 amountOutMin_, address[] memory path_, uint256 deadline_) external {
-        IERC20(path_[0]).safeTransferFrom(msg.sender, address(this), amountIn_);
+    function swapTokens(uint256 amountIn_, uint256 amountOutMin_, address[] memory path_, uint256 deadline_) public returns (uint256) {
         IERC20(path_[0]).approve(V2Router02Address, amountIn_);
         uint[] memory amountOuts = IV2Router02(V2Router02Address).swapExactTokensForTokens(amountIn_,amountOutMin_,path_, msg.sender, deadline_);
 
         emit SwapTokens(path_[0], path_[path_.length - 1], amountIn_, amountOuts[amountOuts.length - 1]);
+
+        return amountOuts[amountOuts.length - 1];
+    }
+
+    //TODO make general not only for USDT and DAI
+    function addLiquidity(uint256 amountIn_, uint256 amountOutMin_, address[] memory path_, uint256 amountAMin_, uint256 amountBMin_, uint256 deadline_) external {
+        // 1st Swap Tokens
+        IERC20(USDT).safeTransferFrom(msg.sender, address(this), amountIn_ / 2);
+        swapTokens(amountIn_ / 2, amountOutMin_, path_, deadline_);
+
+        // 2nd Add Liquidity
+        (,,uint256 lpTokenAmount) = IV2Router02(V2Router02Address).addLiquidity(USDT, DAI, amountIn_ / 2, amountBDesired, amountAMin_, amountBMin_, msg.sender, deadline);
+
+        emit AddLiquidity(USDT, DAI, lpTokenAmount);
     }
 
 }
