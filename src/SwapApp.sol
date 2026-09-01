@@ -15,7 +15,6 @@ contract SwappApp {
     }
 
     function swapTokens(uint256 amountIn_, uint256 amountOutMin_, address[] memory path_, uint256 deadline_) external {
-        // falta aqui un approve para hacer el transfer from? es decir al igual que hay un IERC().approve antes del swapExactTokensForTokens
         IERC20(path_[0]).safeTransferFrom(msg.sender, address(this), amountIn_);
         IERC20(path_[0]).approve(V2Router02Address, amountIn_);
         uint[] memory amountOuts = IV2Router02(V2Router02Address).swapExactTokensForTokens(amountIn_,amountOutMin_,path_, msg.sender, deadline_);

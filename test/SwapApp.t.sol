@@ -1,5 +1,3 @@
-
-
 contract SwapAppTest is Test {
 
     SwapApp app;
