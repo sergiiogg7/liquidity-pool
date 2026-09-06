@@ -5,6 +5,8 @@ pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
 import "../src/SwapApp.sol";
+import "../src/interfaces/IFactory.sol";
+import "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 contract SwappAppTest is Test {
 
@@ -17,6 +19,8 @@ contract SwappAppTest is Test {
 
     function setUp() public {
         app = new SwapApp(uniswapV2SwappRouterAddress, uniswapv2FactoryAddress, USDT, DAI);
+        deal(USDT, user, 100 * 1e6);
+        deal(DAI, user, 100 * 1e18);
     }
 
     function testHasBeenDeployedCorrectly() public view {
@@ -35,7 +39,7 @@ contract SwappAppTest is Test {
 
         uint256 usdtBalanceBefore = IERC20(USDT).balanceOf(user);
         uint256 daiBalanceBefore = IERC20(DAI).balanceOf(user);
-        app.swapTokens(amountIn, amountOutMin, path, msg.sender, deadline);
+        app.swapTokens(amountIn, amountOutMin, path, user, deadline);
         uint256 usdtBalanceAfter = IERC20(USDT).balanceOf(user);
         uint256 daiBalanceAfter = IERC20(DAI).balanceOf(user);
 
@@ -58,6 +62,40 @@ contract SwappAppTest is Test {
 
         IERC20(USDT).approve(address(app), amountIn_);
         app.addLiquidity(amountIn_, amountOutMin_, path_, amountAMin_, amountBMin_, deadline_);
+
+        vm.stopPrank();
+    }
+
+    function testCanRemoveLiquidityCorrectly() public {
+        vm.startPrank(user);
+        uint256 amountIn_ = 6 * 1e6;
+        uint256 amountOutMin_ = 2 * 1e18;
+        address[] memory path_ = new address[](2);
+        path_[0] = USDT;
+        path_[1] = DAI;
+        uint256 amountAMin_ = 0;
+        uint256 amountBMin_ = 0;
+        uint256 deadline_ = 1738499328 + 1000000000;
+
+        IERC20(USDT).approve(address(app), amountIn_);
+        app.addLiquidity(amountIn_, amountOutMin_, path_, amountAMin_, amountBMin_, deadline_);
+
+        address lpTokenAddress = IFactory(app.UniswapFactoryAddress()).getPair(USDT, DAI);
+        uint256 lpTokenBalance = IERC20(lpTokenAddress).balanceOf(user);
+        assert(lpTokenBalance > 0);
+
+        uint256 usdtBalanceBefore = IERC20(USDT).balanceOf(user);
+        uint256 daiBalanceBefore = IERC20(DAI).balanceOf(user);
+
+        IERC20(lpTokenAddress).approve(address(app), lpTokenBalance);
+        app.removeLiquidity(lpTokenBalance, amountAMin_, amountBMin_, user, deadline_);
+
+        uint256 usdtBalanceAfter = IERC20(USDT).balanceOf(user);
+        uint256 daiBalanceAfter = IERC20(DAI).balanceOf(user);
+
+        assert(usdtBalanceAfter > usdtBalanceBefore);
+        assert(daiBalanceAfter > daiBalanceBefore);
+        assert(IERC20(lpTokenAddress).balanceOf(user) == 0);
 
         vm.stopPrank();
     }

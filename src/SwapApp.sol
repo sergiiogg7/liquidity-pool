@@ -49,6 +49,7 @@ contract SwapApp {
 
     function removeLiquidity(uint256 liquidityAmount_, uint256 amountAMin_, uint256 amountBMin_, address to_, uint256 deadline_) external {
         address lpTokenAddress = IFactory(UniswapFactoryAddress).getPair(USDT, DAI);
+        IERC20(lpTokenAddress).safeTransferFrom(msg.sender, address(this), liquidityAmount_);
         IERC20(lpTokenAddress).approve(V2Router02Address, liquidityAmount_);
         IV2Router02(V2Router02Address).removeLiquidity(USDT, DAI, liquidityAmount_, amountAMin_, amountBMin_, to_, deadline_);
     }
