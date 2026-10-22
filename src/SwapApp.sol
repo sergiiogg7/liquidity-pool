@@ -21,6 +21,9 @@ error ZeroAmount();
 /// @notice Thrown when the swap path has fewer than two tokens.
 error InvalidPath();
 
+/// @notice Thrown when liquidity amount to remove is zero.
+error ZeroLiquidity();
+
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
 /// @title SwapApp
@@ -43,6 +46,9 @@ contract SwapApp is ReentrancyGuard, Ownable2Step, Pausable {
     /// @notice DAI token address used in addLiquidity.
     address public immutable DAI;
 
+    /// @notice Uniswap V2 Factory address used to resolve LP token addresses.
+    address public immutable UniswapFactoryAddress;
+
     // ─── Events ───────────────────────────────────────────────────────────────
 
     /// @notice Emitted on a successful token swap.
@@ -58,22 +64,30 @@ contract SwapApp is ReentrancyGuard, Ownable2Step, Pausable {
     );
 
     /// @notice Emitted when liquidity is successfully added to the USDT/DAI pool.
-    /// @param token0       First token of the pair (USDT).
-    /// @param token1       Second token of the pair (DAI).
+    /// @param token0        First token of the pair (USDT).
+    /// @param token1        Second token of the pair (DAI).
     /// @param lpTokenAmount LP tokens minted and sent to the caller.
     event AddLiquidity(address indexed token0, address indexed token1, uint256 lpTokenAmount);
+
+    /// @notice Emitted when liquidity is removed from the USDT/DAI pool.
+    /// @param lpAmount Amount of LP tokens burned.
+    /// @param to       Recipient of the returned USDT and DAI.
+    event RemoveLiquidity(uint256 lpAmount, address indexed to);
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
     /// @notice Deploys SwapApp and sets immutable addresses.
     /// @param v2Router_ Address of the Uniswap V2 Router.
+    /// @param factory_  Address of the Uniswap V2 Factory.
     /// @param usdt_     Address of the USDT token.
     /// @param dai_      Address of the DAI token.
-    constructor(address v2Router_, address usdt_, address dai_) Ownable(msg.sender) {
+    constructor(address v2Router_, address factory_, address usdt_, address dai_) Ownable(msg.sender) {
         if (v2Router_ == address(0)) revert ZeroAddress();
+        if (factory_ == address(0)) revert ZeroAddress();
         if (usdt_ == address(0)) revert ZeroAddress();
         if (dai_ == address(0)) revert ZeroAddress();
         V2Router02Address = v2Router_;
+        UniswapFactoryAddress = factory_;
         USDT = usdt_;
         DAI = dai_;
     }
@@ -172,6 +186,35 @@ contract SwapApp is ReentrancyGuard, Ownable2Step, Pausable {
         if (leftoverDAI > 0) IERC20(DAI).safeTransfer(msg.sender, leftoverDAI);
 
         emit AddLiquidity(USDT, DAI, lpAmount);
+    }
+
+    /// @notice Burns LP tokens and returns the underlying USDT and DAI to `to_`.
+    /// @dev Pulls LP tokens from the caller, approves the router, then calls
+    ///      `removeLiquidity`. The LP token address is resolved via the factory's
+    ///      `getPair` so no extra storage is needed.
+    /// @param liquidityAmount_ Amount of LP tokens to burn.
+    /// @param amountAMin_      Minimum USDT to receive (slippage guard).
+    /// @param amountBMin_      Minimum DAI to receive (slippage guard).
+    /// @param to_              Recipient of the returned tokens.
+    /// @param deadline_        Unix timestamp after which the transaction reverts.
+    function removeLiquidity(
+        uint256 liquidityAmount_,
+        uint256 amountAMin_,
+        uint256 amountBMin_,
+        address to_,
+        uint256 deadline_
+    ) external nonReentrant whenNotPaused {
+        if (liquidityAmount_ == 0) revert ZeroLiquidity();
+
+        address lpToken = IFactory(UniswapFactoryAddress).getPair(USDT, DAI);
+        IERC20(lpToken).safeTransferFrom(msg.sender, address(this), liquidityAmount_);
+        IERC20(lpToken).approve(V2Router02Address, liquidityAmount_);
+
+        IV2Router02(V2Router02Address).removeLiquidity(
+            USDT, DAI, liquidityAmount_, amountAMin_, amountBMin_, to_, deadline_
+        );
+
+        emit RemoveLiquidity(liquidityAmount_, to_);
     }
 
     // ─── Internal ─────────────────────────────────────────────────────────────

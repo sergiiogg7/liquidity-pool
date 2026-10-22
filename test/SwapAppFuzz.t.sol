@@ -48,6 +48,15 @@ contract FuzzMockV2Router is IV2Router02 {
         IERC20(tokenB).transferFrom(msg.sender, address(this), amountBDesired);
         return (amountADesired, amountBDesired, amountADesired + amountBDesired);
     }
+
+    function removeLiquidity(address, address, uint, uint, uint, address, uint)
+        external
+        pure
+        override
+        returns (uint, uint)
+    {
+        return (0, 0);
+    }
 }
 
 // ─── Fuzz Tests ───────────────────────────────────────────────────────────────
@@ -66,7 +75,7 @@ contract SwapAppFuzzTest is Test {
         router = new FuzzMockV2Router();
         usdt = new FuzzMockERC20("USDT", "USDT");
         dai = new FuzzMockERC20("DAI", "DAI");
-        app = new SwapApp(address(router), address(usdt), address(dai));
+        app = new SwapApp(address(router), address(0xFAC7), address(usdt), address(dai));
 
         vm.prank(user);
         usdt.approve(address(app), type(uint256).max);

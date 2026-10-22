@@ -48,6 +48,15 @@ contract InvMockV2Router is IV2Router02 {
         IERC20(tokenB).transferFrom(msg.sender, address(this), amountBDesired);
         return (amountADesired, amountBDesired, amountADesired + amountBDesired);
     }
+
+    function removeLiquidity(address, address, uint, uint, uint, address, uint)
+        external
+        pure
+        override
+        returns (uint, uint)
+    {
+        return (0, 0);
+    }
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -118,7 +127,7 @@ contract SwapAppInvariantTest is Test {
         router = new InvMockV2Router();
         usdt = new InvMockERC20("USDT", "USDT");
         dai = new InvMockERC20("DAI", "DAI");
-        app = new SwapApp(address(router), address(usdt), address(dai));
+        app = new SwapApp(address(router), address(0xFAC7), address(usdt), address(dai));
 
         actors.push(makeAddr("alice"));
         actors.push(makeAddr("bob"));

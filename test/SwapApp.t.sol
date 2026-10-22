@@ -61,6 +61,15 @@ contract MockV2Router is IV2Router02 {
 
         return (amountADesired, amountBDesired, amountADesired + amountBDesired);
     }
+
+    function removeLiquidity(address, address, uint, uint, uint, address, uint)
+        external
+        pure
+        override
+        returns (uint, uint)
+    {
+        return (0, 0);
+    }
 }
 
 /// @dev addLiquidity only consumes half of each token, leaving leftover for the contract to return.
@@ -103,6 +112,15 @@ contract PartialMockV2Router is IV2Router02 {
 
         return (usedA, usedB, usedA + usedB);
     }
+
+    function removeLiquidity(address, address, uint, uint, uint, address, uint)
+        external
+        pure
+        override
+        returns (uint, uint)
+    {
+        return (0, 0);
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -126,7 +144,7 @@ contract SwapAppTest is Test {
         usdt = new MockERC20("USDT", "USDT");
         dai = new MockERC20("DAI", "DAI");
 
-        app = new SwapApp(address(router), address(usdt), address(dai));
+        app = new SwapApp(address(router), address(0xFAC7), address(usdt), address(dai));
 
         usdt.mint(user, 1_000_000 ether);
         dai.mint(user, 1_000_000 ether);
@@ -148,17 +166,17 @@ contract SwapAppTest is Test {
 
     function test_RevertWhen_ConstructorZeroRouter() public {
         vm.expectRevert(ZeroAddress.selector);
-        new SwapApp(address(0), address(usdt), address(dai));
+        new SwapApp(address(0), address(0xFAC7), address(usdt), address(dai));
     }
 
     function test_RevertWhen_ConstructorZeroUSDT() public {
         vm.expectRevert(ZeroAddress.selector);
-        new SwapApp(address(router), address(0), address(dai));
+        new SwapApp(address(router), address(0xFAC7), address(0), address(dai));
     }
 
     function test_RevertWhen_ConstructorZeroDAI() public {
         vm.expectRevert(ZeroAddress.selector);
-        new SwapApp(address(router), address(usdt), address(0));
+        new SwapApp(address(router), address(0xFAC7), address(usdt), address(0));
     }
 
     // ─── Pause / Unpause ─────────────────────────────────────────────────────
@@ -304,7 +322,7 @@ contract SwapAppTest is Test {
     function testAddLiquidityReturnsLeftovers() public {
         // Deploy a new SwapApp backed by PartialMockV2Router
         PartialMockV2Router partialRouter = new PartialMockV2Router();
-        SwapApp partialApp = new SwapApp(address(partialRouter), address(usdt), address(dai));
+        SwapApp partialApp = new SwapApp(address(partialRouter), address(0xFAC7), address(usdt), address(dai));
 
         vm.prank(user);
         usdt.approve(address(partialApp), type(uint256).max);
