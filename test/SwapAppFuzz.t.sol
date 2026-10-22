@@ -4,29 +4,32 @@ pragma solidity ^0.8.24;
 import "forge-std/Test.sol";
 import "../src/SwapApp.sol";
 import "../src/interfaces/IV2Router02.sol";
-import "../lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
-import "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // ─── Mocks (duplicated to keep files self-contained) ─────────────────────────
 
 contract FuzzMockERC20 is ERC20 {
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
-    function mint(address to, uint256 amount) external { _mint(to, amount); }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
 }
 
 contract FuzzMockV2Router is IV2Router02 {
     function swapExactTokensForTokens(
-        uint amountIn,
-        uint amountOutMin,
+        uint256 amountIn,
+        uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint deadline
-    ) external override returns (uint[] memory amounts) {
+        uint256 deadline
+    ) external override returns (uint256[] memory amounts) {
         require(block.timestamp <= deadline, "expired");
         require(amountIn >= amountOutMin, "insufficient output");
         IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
         FuzzMockERC20(path[path.length - 1]).mint(to, amountIn);
-        amounts = new uint[](path.length);
+        amounts = new uint256[](path.length);
         amounts[0] = amountIn;
         amounts[path.length - 1] = amountIn;
     }
@@ -34,13 +37,13 @@ contract FuzzMockV2Router is IV2Router02 {
     function addLiquidity(
         address tokenA,
         address tokenB,
-        uint amountADesired,
-        uint amountBDesired,
-        uint amountAMin,
-        uint amountBMin,
+        uint256 amountADesired,
+        uint256 amountBDesired,
+        uint256 amountAMin,
+        uint256 amountBMin,
         address to,
-        uint deadline
-    ) external override returns (uint amountA, uint amountB, uint liquidity) {
+        uint256 deadline
+    ) external override returns (uint256 amountA, uint256 amountB, uint256 liquidity) {
         require(block.timestamp <= deadline, "expired");
         require(amountADesired >= amountAMin, "A insufficient");
         require(amountBDesired >= amountBMin, "B insufficient");
@@ -49,11 +52,11 @@ contract FuzzMockV2Router is IV2Router02 {
         return (amountADesired, amountBDesired, amountADesired + amountBDesired);
     }
 
-    function removeLiquidity(address, address, uint, uint, uint, address, uint)
+    function removeLiquidity(address, address, uint256, uint256, uint256, address, uint256)
         external
         pure
         override
-        returns (uint, uint)
+        returns (uint256, uint256)
     {
         return (0, 0);
     }

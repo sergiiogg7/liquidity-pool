@@ -6,8 +6,8 @@ pragma solidity 0.8.24;
 import "forge-std/Test.sol";
 import "../src/SwapApp.sol";
 import "../src/interfaces/IV2Router02.sol";
-import "../lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
-import "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 // OZ error selectors — defined inside contracts so must be accessed via bytes4
 bytes4 constant OWNABLE_UNAUTHORIZED = bytes4(keccak256("OwnableUnauthorizedAccount(address)"));
 bytes4 constant ENFORCED_PAUSE = bytes4(keccak256("EnforcedPause()"));
@@ -25,19 +25,19 @@ contract MockERC20 is ERC20 {
 /// @dev 1:1 swap mock. Pulls path[0] from caller, mints path[last] to `to`.
 contract MockV2Router is IV2Router02 {
     function swapExactTokensForTokens(
-        uint amountIn,
-        uint amountOutMin,
+        uint256 amountIn,
+        uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint deadline
-    ) external override returns (uint[] memory amounts) {
+        uint256 deadline
+    ) external override returns (uint256[] memory amounts) {
         require(block.timestamp <= deadline, "expired");
         require(amountIn >= amountOutMin, "insufficient output");
 
         IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
         MockERC20(path[path.length - 1]).mint(to, amountIn);
 
-        amounts = new uint[](path.length);
+        amounts = new uint256[](path.length);
         amounts[0] = amountIn;
         amounts[path.length - 1] = amountIn;
     }
@@ -45,13 +45,13 @@ contract MockV2Router is IV2Router02 {
     function addLiquidity(
         address tokenA,
         address tokenB,
-        uint amountADesired,
-        uint amountBDesired,
-        uint amountAMin,
-        uint amountBMin,
+        uint256 amountADesired,
+        uint256 amountBDesired,
+        uint256 amountAMin,
+        uint256 amountBMin,
         address to,
-        uint deadline
-    ) external override returns (uint amountA, uint amountB, uint liquidity) {
+        uint256 deadline
+    ) external override returns (uint256 amountA, uint256 amountB, uint256 liquidity) {
         require(block.timestamp <= deadline, "expired");
         require(amountADesired >= amountAMin, "A insufficient");
         require(amountBDesired >= amountBMin, "B insufficient");
@@ -62,11 +62,11 @@ contract MockV2Router is IV2Router02 {
         return (amountADesired, amountBDesired, amountADesired + amountBDesired);
     }
 
-    function removeLiquidity(address, address, uint, uint, uint, address, uint)
+    function removeLiquidity(address, address, uint256, uint256, uint256, address, uint256)
         external
         pure
         override
-        returns (uint, uint)
+        returns (uint256, uint256)
     {
         return (0, 0);
     }
@@ -75,19 +75,19 @@ contract MockV2Router is IV2Router02 {
 /// @dev addLiquidity only consumes half of each token, leaving leftover for the contract to return.
 contract PartialMockV2Router is IV2Router02 {
     function swapExactTokensForTokens(
-        uint amountIn,
-        uint amountOutMin,
+        uint256 amountIn,
+        uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint deadline
-    ) external override returns (uint[] memory amounts) {
+        uint256 deadline
+    ) external override returns (uint256[] memory amounts) {
         require(block.timestamp <= deadline, "expired");
         require(amountIn >= amountOutMin, "insufficient output");
 
         IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
         MockERC20(path[path.length - 1]).mint(to, amountIn);
 
-        amounts = new uint[](path.length);
+        amounts = new uint256[](path.length);
         amounts[0] = amountIn;
         amounts[path.length - 1] = amountIn;
     }
@@ -95,17 +95,17 @@ contract PartialMockV2Router is IV2Router02 {
     function addLiquidity(
         address tokenA,
         address tokenB,
-        uint amountADesired,
-        uint amountBDesired,
-        uint amountAMin,
-        uint amountBMin,
+        uint256 amountADesired,
+        uint256 amountBDesired,
+        uint256 amountAMin,
+        uint256 amountBMin,
         address to,
-        uint deadline
-    ) external override returns (uint amountA, uint amountB, uint liquidity) {
+        uint256 deadline
+    ) external override returns (uint256 amountA, uint256 amountB, uint256 liquidity) {
         require(block.timestamp <= deadline, "expired");
 
-        uint usedA = amountADesired / 2;
-        uint usedB = amountBDesired / 2;
+        uint256 usedA = amountADesired / 2;
+        uint256 usedB = amountBDesired / 2;
 
         IERC20(tokenA).transferFrom(msg.sender, address(this), usedA);
         IERC20(tokenB).transferFrom(msg.sender, address(this), usedB);
@@ -113,11 +113,11 @@ contract PartialMockV2Router is IV2Router02 {
         return (usedA, usedB, usedA + usedB);
     }
 
-    function removeLiquidity(address, address, uint, uint, uint, address, uint)
+    function removeLiquidity(address, address, uint256, uint256, uint256, address, uint256)
         external
         pure
         override
-        returns (uint, uint)
+        returns (uint256, uint256)
     {
         return (0, 0);
     }
@@ -312,8 +312,8 @@ contract SwapAppTest is Test {
     }
 
     function testAddLiquidityEmitsEvent() public {
-        vm.expectEmit(true, true, false, false);
-        emit SwapApp.AddLiquidity(address(usdt), address(dai), 0);
+        vm.expectEmit(true, true, true, false);
+        emit SwapApp.AddLiquidity(user, address(usdt), address(dai), 0);
 
         vm.prank(user);
         app.addLiquidity(1_000 ether, 0, 0, 0, DEADLINE);

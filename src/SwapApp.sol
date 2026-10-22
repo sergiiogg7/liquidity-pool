@@ -4,18 +4,24 @@ pragma solidity 0.8.24;
 
 import "./interfaces/IV2Router02.sol";
 import "./interfaces/IFactory.sol";
-import "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
-import "../lib/openzeppelin-contracts/contracts/access/Ownable2Step.sol";
-import "../lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 // ─── Errors ───────────────────────────────────────────────────────────────────
 
-/// @notice Thrown when a constructor address argument is the zero address.
+/// @notice Thrown when a required address argument is the zero address.
 error ZeroAddress();
 
-/// @notice Thrown when amountIn_ is zero.
+/// @notice Thrown when the constructor receives the same address for USDT and DAI.
+error IdenticalTokens();
+
+/// @notice Thrown when the factory has no USDT/DAI pair deployed.
+error PairNotFound();
+
+/// @notice Thrown when an input amount is zero.
 error ZeroAmount();
 
 /// @notice Thrown when the swap path has fewer than two tokens.
@@ -56,18 +62,14 @@ contract SwapApp is ReentrancyGuard, Ownable2Step, Pausable {
     /// @param tokenOut Address of the token received by the user.
     /// @param amountIn Exact input amount.
     /// @param amountOut Actual output amount received.
-    event SwapTokens(
-        address indexed tokenIn,
-        address indexed tokenOut,
-        uint256 amountIn,
-        uint256 amountOut
-    );
+    event SwapTokens(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut);
 
     /// @notice Emitted when liquidity is successfully added to the USDT/DAI pool.
+    /// @param user          Account that provided liquidity and received the LP tokens.
     /// @param token0        First token of the pair (USDT).
     /// @param token1        Second token of the pair (DAI).
     /// @param lpTokenAmount LP tokens minted and sent to the caller.
-    event AddLiquidity(address indexed token0, address indexed token1, uint256 lpTokenAmount);
+    event AddLiquidity(address indexed user, address indexed token0, address indexed token1, uint256 lpTokenAmount);
 
     /// @notice Emitted when liquidity is removed from the USDT/DAI pool.
     /// @param lpAmount Amount of LP tokens burned.
@@ -86,6 +88,7 @@ contract SwapApp is ReentrancyGuard, Ownable2Step, Pausable {
         if (factory_ == address(0)) revert ZeroAddress();
         if (usdt_ == address(0)) revert ZeroAddress();
         if (dai_ == address(0)) revert ZeroAddress();
+        if (usdt_ == dai_) revert IdenticalTokens();
         V2Router02Address = v2Router_;
         UniswapFactoryAddress = factory_;
         USDT = usdt_;
@@ -115,12 +118,12 @@ contract SwapApp is ReentrancyGuard, Ownable2Step, Pausable {
     /// @param path_        Ordered token route, e.g. [USDT, DAI].
     /// @param deadline_    Unix timestamp after which the transaction reverts.
     /// @return amountOut   Actual amount of output tokens received by the caller.
-    function swapTokens(
-        uint256 amountIn_,
-        uint256 amountOutMin_,
-        address[] memory path_,
-        uint256 deadline_
-    ) public nonReentrant whenNotPaused returns (uint256 amountOut) {
+    function swapTokens(uint256 amountIn_, uint256 amountOutMin_, address[] memory path_, uint256 deadline_)
+        public
+        nonReentrant
+        whenNotPaused
+        returns (uint256 amountOut)
+    {
         if (amountIn_ == 0) revert ZeroAmount();
         if (path_.length < 2) revert InvalidPath();
 
@@ -152,40 +155,14 @@ contract SwapApp is ReentrancyGuard, Ownable2Step, Pausable {
         if (amountUSDT_ == 0) revert ZeroAmount();
 
         uint256 half = amountUSDT_ / 2;
-        uint256 remaining = amountUSDT_ - half; // handles odd amounts
+        uint256 usdtForPool = amountUSDT_ - half;
 
-        // Pull all USDT from caller
         IERC20(USDT).safeTransferFrom(msg.sender, address(this), amountUSDT_);
 
-        // Swap half USDT → DAI; output stays in this contract
-        address[] memory path = new address[](2);
-        path[0] = USDT;
-        path[1] = DAI;
-        uint256 daiReceived = _swap(half, amountOutMin_, path, address(this), deadline_);
+        uint256 daiReceived = _swap(half, amountOutMin_, _usdtDaiPath(), address(this), deadline_);
+        uint256 lpAmount = _provideLiquidity(usdtForPool, daiReceived, amountAMin_, amountBMin_, deadline_);
 
-        // Approve router to spend remaining USDT and received DAI
-        IERC20(USDT).approve(V2Router02Address, remaining);
-        IERC20(DAI).approve(V2Router02Address, daiReceived);
-
-        (uint256 usedUSDT, uint256 usedDAI, uint256 lpAmount) = IV2Router02(V2Router02Address)
-            .addLiquidity(
-                USDT,
-                DAI,
-                remaining,
-                daiReceived,
-                amountAMin_,
-                amountBMin_,
-                msg.sender,
-                deadline_
-            );
-
-        // Return leftover tokens to caller
-        uint256 leftoverUSDT = remaining - usedUSDT;
-        uint256 leftoverDAI = daiReceived - usedDAI;
-        if (leftoverUSDT > 0) IERC20(USDT).safeTransfer(msg.sender, leftoverUSDT);
-        if (leftoverDAI > 0) IERC20(DAI).safeTransfer(msg.sender, leftoverDAI);
-
-        emit AddLiquidity(USDT, DAI, lpAmount);
+        emit AddLiquidity(msg.sender, USDT, DAI, lpAmount);
     }
 
     /// @notice Burns LP tokens and returns the underlying USDT and DAI to `to_`.
@@ -205,14 +182,16 @@ contract SwapApp is ReentrancyGuard, Ownable2Step, Pausable {
         uint256 deadline_
     ) external nonReentrant whenNotPaused {
         if (liquidityAmount_ == 0) revert ZeroLiquidity();
+        if (to_ == address(0)) revert ZeroAddress();
 
         address lpToken = IFactory(UniswapFactoryAddress).getPair(USDT, DAI);
-        IERC20(lpToken).safeTransferFrom(msg.sender, address(this), liquidityAmount_);
-        IERC20(lpToken).approve(V2Router02Address, liquidityAmount_);
+        if (lpToken == address(0)) revert PairNotFound();
 
-        IV2Router02(V2Router02Address).removeLiquidity(
-            USDT, DAI, liquidityAmount_, amountAMin_, amountBMin_, to_, deadline_
-        );
+        IERC20(lpToken).safeTransferFrom(msg.sender, address(this), liquidityAmount_);
+        IERC20(lpToken).forceApprove(V2Router02Address, liquidityAmount_);
+
+        IV2Router02(V2Router02Address)
+            .removeLiquidity(USDT, DAI, liquidityAmount_, amountAMin_, amountBMin_, to_, deadline_);
 
         emit RemoveLiquidity(liquidityAmount_, to_);
     }
@@ -227,21 +206,58 @@ contract SwapApp is ReentrancyGuard, Ownable2Step, Pausable {
     /// @param to          Recipient of the output tokens.
     /// @param deadline    Unix timestamp deadline.
     /// @return Output amount received.
-    function _swap(
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] memory path,
-        address to,
-        uint256 deadline
-    ) internal returns (uint256) {
-        IERC20(path[0]).approve(V2Router02Address, amountIn);
-        uint256[] memory amounts = IV2Router02(V2Router02Address).swapExactTokensForTokens(
-            amountIn,
-            amountOutMin,
-            path,
-            to,
-            deadline
-        );
+    function _swap(uint256 amountIn, uint256 amountOutMin, address[] memory path, address to, uint256 deadline)
+        internal
+        returns (uint256)
+    {
+        IERC20(path[0]).forceApprove(V2Router02Address, amountIn);
+        uint256[] memory amounts =
+            IV2Router02(V2Router02Address).swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline);
         return amounts[amounts.length - 1];
+    }
+
+    /// @notice Adds `usdtAmount` and `daiAmount` as liquidity and refunds unused tokens to the caller.
+    /// @dev Allowances are reset to zero afterwards so no residual approval remains on the router.
+    /// @param usdtAmount   USDT offered to the pool.
+    /// @param daiAmount    DAI offered to the pool.
+    /// @param amountAMin   Minimum USDT accepted by the router.
+    /// @param amountBMin   Minimum DAI accepted by the router.
+    /// @param deadline     Unix timestamp deadline.
+    /// @return lpAmount    LP tokens minted to the caller.
+    function _provideLiquidity(
+        uint256 usdtAmount,
+        uint256 daiAmount,
+        uint256 amountAMin,
+        uint256 amountBMin,
+        uint256 deadline
+    ) internal returns (uint256 lpAmount) {
+        IERC20(USDT).forceApprove(V2Router02Address, usdtAmount);
+        IERC20(DAI).forceApprove(V2Router02Address, daiAmount);
+
+        uint256 usedUSDT;
+        uint256 usedDAI;
+        (usedUSDT, usedDAI, lpAmount) = IV2Router02(V2Router02Address)
+            .addLiquidity(USDT, DAI, usdtAmount, daiAmount, amountAMin, amountBMin, msg.sender, deadline);
+
+        IERC20(USDT).forceApprove(V2Router02Address, 0);
+        IERC20(DAI).forceApprove(V2Router02Address, 0);
+
+        _refund(USDT, usdtAmount - usedUSDT);
+        _refund(DAI, daiAmount - usedDAI);
+    }
+
+    /// @notice Sends `amount` of `token` to the caller when it is non-zero.
+    /// @param token  Token to refund.
+    /// @param amount Amount to refund.
+    function _refund(address token, uint256 amount) internal {
+        if (amount > 0) IERC20(token).safeTransfer(msg.sender, amount);
+    }
+
+    /// @notice Builds the [USDT, DAI] swap path.
+    /// @return path Two-element route from USDT to DAI.
+    function _usdtDaiPath() internal view returns (address[] memory path) {
+        path = new address[](2);
+        path[0] = USDT;
+        path[1] = DAI;
     }
 }
