@@ -15,7 +15,7 @@ forge test --fork-url $ARBITRUM_RPC_URL -vvv      # optionally against an Arbitr
 forge fmt --check                                 # CI enforces formatting
 ```
 
-CI (`.github/workflows/test.yml`) runs `forge fmt --check`, `forge build --sizes`, `forge test -vvv`.
+CI (`.github/workflows/test.yml`) runs `forge fmt --check`, `forge build --sizes`, `forge test` (profile `ci`), a 95% line-coverage gate on `src/` (`forge coverage --no-match-coverage "script|test"`), `forge snapshot --check` and Slither. Update `.gas-snapshot` with `forge snapshot` after intentional gas changes.
 
 ## Architecture
 
@@ -25,13 +25,9 @@ Everything lives in one contract, `src/SwapApp.sol` (`SwapApp`): a thin Uniswap 
 - The contract is designed to hold no tokens between calls: it pulls tokens in, approves the router, and forwards outputs/leftovers to the caller in the same tx.
 - `addLiquidity` takes only USDT: it swaps half to DAI (held in the contract), adds both as liquidity (LP tokens minted directly to `msg.sender`), then refunds unused USDT/DAI.
 - `removeLiquidity` resolves the LP token via `IFactory.getPair(USDT, DAI)` rather than storing it, pulls LP tokens from the caller, and has the router send the underlying tokens to `to_`.
-- Custom errors (`ZeroAddress`, `ZeroAmount`, `InvalidPath`, `ZeroLiquidity`) are file-level declarations in `SwapApp.sol`, not inside the contract.
-- `src/interfaces/` holds minimal local `IV2Router02` and `IFactory`. OpenZeppelin is imported by relative path (`../lib/openzeppelin-contracts/...`), not via remappings.
+- Custom errors (`ZeroAddress`, `IdenticalTokens`, `PairNotFound`, `ZeroAmount`, `InvalidPath`, `ZeroLiquidity`) are file-level declarations in `SwapApp.sol`, not inside the contract.
+- `src/interfaces/` holds minimal local `IV2Router02` and `IFactory`. OpenZeppelin is imported through remappings (`@openzeppelin/contracts/...`). `addLiquidity` is split into `_provideLiquidity`, `_refund` and `_usdtDaiPath` so `forge coverage` (no `via_ir`) does not hit stack-too-deep.
 
 ## Tests
 
-`test/SwapApp.t.sol`, `SwapAppFuzz.t.sol`, `SwapAppInvariant.t.sol` each define their own mock ERC20 / router (names prefixed per file, e.g. `InvMockERC20`) to avoid collisions — keep that when adding mocks. The mock routers enforce `deadline` and min-amount checks so slippage/expiry paths can be tested without a fork.
-
-## README drift
-
-`README.md` is out of date versus the code: it shows `swapTokens` with a `to_` argument, `addLiquidity` with a `path_` argument, and the router/factory as public getters under different names. Trust `src/SwapApp.sol` for the real signatures (`swapTokens(amountIn, amountOutMin, path, deadline)` sends output to `msg.sender`; `addLiquidity(amountUSDT, amountOutMin, amountAMin, amountBMin, deadline)`).
+`test/SwapApp.t.sol`, `SwapAppLiquidity.t.sol`, `SwapAppFuzz.t.sol`, `SwapAppInvariant.t.sol` each define their own mock ERC20 / router (names prefixed per file, e.g. `InvMockERC20`) to avoid collisions — keep that when adding mocks. The mock routers enforce `deadline` and min-amount checks so slippage/expiry paths can be tested without a fork.

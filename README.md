@@ -1,127 +1,36 @@
 # LiquidityPool
 
-Uniswap V2 liquidity pool manager for ERC-20 tokens on Arbitrum. Single contract for swaps, adding liquidity, and removing liquidity.
+Thin Uniswap V2 wrapper for ERC-20 tokens on Arbitrum. One contract, `SwapApp`, for swaps, adding liquidity and removing liquidity on a USDT/DAI pair.
 
 ## Overview
 
-LiquidityPool abstracts Uniswap V2 complexity with three operations:
-
-- **Swap tokens** — Direct token-to-token exchange
-- **Add liquidity** — Deposit and receive LP tokens (internally 50/50 split via swap)
-- **Remove liquidity** — Burn LP tokens, get underlying tokens back
+- **Swap tokens**: exact-input swap over any path. Output goes to the caller.
+- **Add liquidity**: the caller provides only USDT. The contract swaps half to DAI, adds both as liquidity (LP tokens minted to the caller) and refunds anything unused.
+- **Remove liquidity**: the caller approves LP tokens, the contract burns them through the router and sends USDT and DAI to a chosen recipient.
 
 ```
-User ──approve──▶ LiquidityPool ──▶ Uniswap V2 Router
-                       │
-                       ├─ swapTokens()
-                       ├─ addLiquidity()
-                       └─ removeLiquidity()
+User --approve--> SwapApp --> Uniswap V2 Router
+                    |
+                    +-- swapTokens()
+                    +-- addLiquidity()
+                    +-- removeLiquidity()
 ```
 
-## Getting Started
+The contract is designed to hold no tokens between calls: tokens are pulled in, approved to the router and forwarded to the caller in the same transaction.
 
-```bash
-git clone https://github.com/<your-username>/liquidity-pool.git
-cd liquidity-pool
-forge install
-```
-
-## Build
-
-```bash
-forge build
-```
-
-## Test
-
-Tests run against an Arbitrum mainnet fork:
-
-```bash
-forge test --fork-url $ARBITRUM_RPC_URL -vvv
-```
-
-## Operations
-
-### 1. Swap Tokens
-
-Direct token-to-token trade.
+## Contract Reference
 
 ```solidity
-address[] memory path = new address[](2);
-path[0] = USDT;
-path[1] = DAI;
-
-IERC20(USDT).approve(address(app), amountIn);
-
-uint256 amountOut = app.swapTokens(
-    amountIn,
-    amountOutMin,
-    path,
-    msg.sender,
-    deadline
-);
-```
-
-### 2. Add Liquidity
-
-Deposit tokens into the pool. Splits input 50/50: half swaps to the paired token, both added to pool.
-
-```solidity
-address[] memory path = new address[](2);
-path[0] = USDT;
-path[1] = DAI;
-
-IERC20(USDT).approve(address(app), amountIn);
-
-app.addLiquidity(
-    amountIn,        // Total USDT (half → swap, half → pool)
-    amountOutMin,    // Min DAI from swap
-    path,
-    amountAMin,      // Min USDT liquidity
-    amountBMin,      // Min DAI liquidity
-    deadline
-);
-// Returns LP tokens to msg.sender
-```
-
-### 3. Remove Liquidity
-
-Burn LP tokens and receive underlying tokens.
-
-```solidity
-address lpTokenAddress = IFactory(app.UniswapFactoryAddress())
-    .getPair(USDT, DAI);
-
-IERC20(lpTokenAddress).approve(address(app), lpAmount);
-
-app.removeLiquidity(
-    lpAmount,
-    amountAMin,      // Min USDT returned
-    amountBMin,      // Min DAI returned
-    msg.sender,
-    deadline
-);
-```
-
-## Contract Interface
-
-```solidity
-function swapTokens(
-    uint256 amountIn_,
-    uint256 amountOutMin_,
-    address[] memory path_,
-    address to_,
-    uint256 deadline_
-) external returns (uint256)
+function swapTokens(uint256 amountIn_, uint256 amountOutMin_, address[] memory path_, uint256 deadline_)
+    public returns (uint256 amountOut);
 
 function addLiquidity(
-    uint256 amountIn_,
+    uint256 amountUSDT_,
     uint256 amountOutMin_,
-    address[] memory path_,
     uint256 amountAMin_,
     uint256 amountBMin_,
     uint256 deadline_
-) external
+) external;
 
 function removeLiquidity(
     uint256 liquidityAmount_,
@@ -129,43 +38,94 @@ function removeLiquidity(
     uint256 amountBMin_,
     address to_,
     uint256 deadline_
-) external
+) external;
+
+function pause() external;   // owner only
+function unpause() external; // owner only
 ```
 
-| Parameter       | Description                                    |
-|-----------------|------------------------------------------------|
-| `amountIn_`     | Input amount (whole for swap, split for add)   |
-| `amountOutMin_` | Minimum output from swap (slippage guard)      |
-| `path_`         | Token route, e.g. `[USDT, DAI]`                |
-| `to_`           | Recipient address                              |
-| `amountAMin_`   | Minimum first token (liquidity)                 |
-| `amountBMin_`   | Minimum second token (liquidity)                |
-| `deadline_`     | Transaction deadline (Unix timestamp)           |
-| `liquidityAmount_` | LP tokens to burn                           |
+| Parameter | Description |
+|---|---|
+| `amountIn_` / `amountUSDT_` | Input amount. For `addLiquidity`, half is swapped to DAI |
+| `amountOutMin_` | Minimum output of the swap leg (slippage guard) |
+| `path_` | Token route, for example `[USDT, DAI]` |
+| `amountAMin_` / `amountBMin_` | Minimum USDT / DAI accepted by the router |
+| `liquidityAmount_` | LP tokens to burn |
+| `to_` | Recipient of the underlying tokens (cannot be zero) |
+| `deadline_` | Unix timestamp after which the call reverts |
+
+Custom errors: `ZeroAddress`, `IdenticalTokens`, `PairNotFound`, `ZeroAmount`, `InvalidPath`, `ZeroLiquidity`.
+
+## Security
+
+| Measure | Location |
+|---|---|
+| Reentrancy guard on every user function | `SwapApp` (`nonReentrant`) |
+| Pausable, owner can halt all user functions | `SwapApp.pause`, `SwapApp.unpause` |
+| Two-step ownership transfer | `Ownable2Step` |
+| `SafeERC20` transfers and `forceApprove` (works with USDT-style tokens) | `SwapApp` |
+| Allowances to the router reset to zero after `addLiquidity` | `SwapApp._provideLiquidity` |
+| Constructor validation: zero addresses, identical tokens | `SwapApp` constructor |
+| LP pair existence and recipient checked before burning | `SwapApp.removeLiquidity` |
+| Custom errors only, no `require` strings | `SwapApp.sol` |
+| Slither in CI | `slither.config.json` |
+
+See [SECURITY.md](SECURITY.md) for assumptions and limits.
+
+## Testing
+
+Tests use mock routers, factories and tokens, so no fork is required.
+
+| Suite | Type |
+|---|---|
+| `SwapApp.t.sol` | Unit: constructor, pause, ownership, swap, add liquidity |
+| `SwapAppLiquidity.t.sol` | Unit and fuzz: remove liquidity, constructor checks, USDT-style token, reentrancy attacker |
+| `SwapAppFuzz.t.sol` | Fuzz: amounts and fund retention |
+| `SwapAppInvariant.t.sol` | Invariant: contract never holds USDT or DAI, never leaves an allowance on the router |
+
+```bash
+forge test                                              # all tests
+forge coverage --no-match-coverage "script|test"        # coverage of src/
+forge snapshot --check                                  # gas regression check
+```
+
+CI runs `forge fmt --check`, `forge build --sizes`, `forge test` (profile `ci`, higher fuzz runs), a 95% line-coverage gate on `src/`, `forge snapshot --check` and Slither.
+
+## Getting Started
+
+```bash
+git clone --recursive https://github.com/sergiiogg7/liquidity-pool.git
+cd liquidity-pool
+forge build
+forge test
+```
+
+Deploy (Arbitrum addresses are read from the environment, see `.env.example`):
+
+```bash
+cp .env.example .env   # fill in values
+source .env
+forge script script/Deploy.s.sol --rpc-url $ARBITRUM_RPC_URL --private-key $PRIVATE_KEY --broadcast
+```
 
 ## Tech Stack
 
-- **Solidity** `^0.8.24`
-- **Foundry** — Build, test, deploy toolkit
-- **OpenZeppelin v5** — `SafeERC20`, `IERC20`
-- **Uniswap V2** — DEX router for token swaps
-- **Arbitrum** — Target deployment network
+- Solidity 0.8.24, Foundry (`via_ir`, optimizer)
+- OpenZeppelin v5: `SafeERC20`, `ReentrancyGuard`, `Ownable2Step`, `Pausable`
+- Uniswap V2 router and factory on Arbitrum
 
 ## Project Structure
 
 ```
 liquidity-pool/
 ├── src/
-│   ├── SwapApp.sol              # Liquidity pool manager
-│   └── interfaces/
-│       ├── IV2Router02.sol      # Uniswap V2 Router
-│       └── IFactory.sol         # Uniswap V2 Factory
-├── test/
-│   └── SwapApp.t.sol            # Fork tests (Arbitrum)
-├── lib/
-│   ├── forge-std/               # Foundry testing
-│   └── openzeppelin-contracts/  # ERC-20 utilities
-└── foundry.toml                 # Config
+│   ├── SwapApp.sol
+│   └── interfaces/          # IV2Router02, IFactory
+├── test/                    # unit, fuzz and invariant suites with mocks
+├── script/Deploy.s.sol
+├── slither.config.json
+├── SECURITY.md
+└── foundry.toml
 ```
 
 ## License
