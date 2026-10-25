@@ -87,7 +87,7 @@ contract SwapAppFuzzTest is Test {
     }
 
     /// @dev Any valid amount swaps 1:1 and leaves the contract with zero balance.
-    function testFuzz_SwapAnyAmount(uint256 amountIn) public {
+    function testFuzz_swapTokens_anyAmount_swapsOneToOne(uint256 amountIn) public {
         amountIn = bound(amountIn, 1, 100_000 ether);
 
         usdt.mint(user, amountIn);
@@ -109,7 +109,7 @@ contract SwapAppFuzzTest is Test {
     }
 
     /// @dev Any valid USDT amount leaves the contract with zero USDT and DAI.
-    function testFuzz_AddLiquidityAnyAmount(uint256 amountUSDT) public {
+    function testFuzz_addLiquidity_anyAmount_leavesNoBalance(uint256 amountUSDT) public {
         amountUSDT = bound(amountUSDT, 2, 100_000 ether);
 
         usdt.mint(user, amountUSDT);
@@ -122,7 +122,7 @@ contract SwapAppFuzzTest is Test {
     }
 
     /// @dev Contract never retains funds regardless of operation type.
-    function testFuzz_ContractNeverRetainsFunds(uint256 amount, bool doSwap) public {
+    function testFuzz_swapOrAddLiquidity_anyAmount_leavesNoBalance(uint256 amount, bool doSwap) public {
         amount = bound(amount, 2, 100_000 ether);
         usdt.mint(user, amount);
 

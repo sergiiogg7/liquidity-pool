@@ -157,31 +157,31 @@ contract SwapAppTest is Test {
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
-    function testConstructorSetsAddresses() public view {
+    function test_constructor_withValidArgs_setsAddresses() public view {
         assertEq(app.V2Router02Address(), address(router));
         assertEq(app.USDT(), address(usdt));
         assertEq(app.DAI(), address(dai));
         assertEq(app.owner(), owner);
     }
 
-    function test_RevertWhen_ConstructorZeroRouter() public {
+    function test_constructor_withZeroRouter_revertsWithZeroAddress() public {
         vm.expectRevert(ZeroAddress.selector);
         new SwapApp(address(0), address(0xFAC7), address(usdt), address(dai));
     }
 
-    function test_RevertWhen_ConstructorZeroUSDT() public {
+    function test_constructor_withZeroUsdt_revertsWithZeroAddress() public {
         vm.expectRevert(ZeroAddress.selector);
         new SwapApp(address(router), address(0xFAC7), address(0), address(dai));
     }
 
-    function test_RevertWhen_ConstructorZeroDAI() public {
+    function test_constructor_withZeroDai_revertsWithZeroAddress() public {
         vm.expectRevert(ZeroAddress.selector);
         new SwapApp(address(router), address(0xFAC7), address(usdt), address(0));
     }
 
     // ─── Pause / Unpause ─────────────────────────────────────────────────────
 
-    function testPauseUnpause() public {
+    function test_pause_thenUnpause_togglesPausedState() public {
         app.pause();
         assertTrue(app.paused());
 
@@ -189,13 +189,13 @@ contract SwapAppTest is Test {
         assertFalse(app.paused());
     }
 
-    function test_RevertWhen_PauseNotOwner() public {
+    function test_pause_byNonOwner_reverts() public {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(OWNABLE_UNAUTHORIZED, user));
         app.pause();
     }
 
-    function test_RevertWhen_UnpauseNotOwner() public {
+    function test_unpause_byNonOwner_reverts() public {
         app.pause();
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(OWNABLE_UNAUTHORIZED, user));
@@ -204,7 +204,7 @@ contract SwapAppTest is Test {
 
     // ─── Ownable2Step ─────────────────────────────────────────────────────────
 
-    function testOwnershipTransfer2Step() public {
+    function test_transferOwnership_thenAccept_changesOwner() public {
         app.transferOwnership(user);
         assertEq(app.pendingOwner(), user);
         assertEq(app.owner(), owner);
@@ -216,7 +216,7 @@ contract SwapAppTest is Test {
 
     // ─── swapTokens ───────────────────────────────────────────────────────────
 
-    function testSwapTokens() public {
+    function test_swapTokens_withValidPath_swapsAndHoldsNothing() public {
         uint256 amountIn = 1_000 ether;
         address[] memory path = new address[](2);
         path[0] = address(usdt);
@@ -238,7 +238,7 @@ contract SwapAppTest is Test {
         assertEq(dai.balanceOf(address(app)), 0);
     }
 
-    function test_RevertWhen_SwapZeroAmount() public {
+    function test_swapTokens_withZeroAmount_revertsWithZeroAmount() public {
         address[] memory path = new address[](2);
         path[0] = address(usdt);
         path[1] = address(dai);
@@ -248,7 +248,7 @@ contract SwapAppTest is Test {
         app.swapTokens(0, 0, path, DEADLINE);
     }
 
-    function test_RevertWhen_SwapInvalidPath() public {
+    function test_swapTokens_withShortPath_revertsWithInvalidPath() public {
         address[] memory path = new address[](1);
         path[0] = address(usdt);
 
@@ -257,7 +257,7 @@ contract SwapAppTest is Test {
         app.swapTokens(1 ether, 0, path, DEADLINE);
     }
 
-    function test_RevertWhen_SwapWhenPaused() public {
+    function test_swapTokens_whenPaused_reverts() public {
         app.pause();
         address[] memory path = new address[](2);
         path[0] = address(usdt);
@@ -268,7 +268,7 @@ contract SwapAppTest is Test {
         app.swapTokens(1 ether, 0, path, DEADLINE);
     }
 
-    function testSwapEmitsEvent() public {
+    function test_swapTokens_withValidPath_emitsEvent() public {
         uint256 amountIn = 500 ether;
         address[] memory path = new address[](2);
         path[0] = address(usdt);
@@ -283,7 +283,7 @@ contract SwapAppTest is Test {
 
     // ─── addLiquidity ─────────────────────────────────────────────────────────
 
-    function testAddLiquidity() public {
+    function test_addLiquidity_withValidAmount_spendsUsdtAndHoldsNothing() public {
         uint256 amountUSDT = 1_000 ether;
         uint256 usdtBefore = usdt.balanceOf(user);
 
@@ -298,20 +298,20 @@ contract SwapAppTest is Test {
         assertEq(dai.balanceOf(address(app)), 0);
     }
 
-    function test_RevertWhen_AddLiquidityZeroAmount() public {
+    function test_addLiquidity_withZeroAmount_revertsWithZeroAmount() public {
         vm.prank(user);
         vm.expectRevert(ZeroAmount.selector);
         app.addLiquidity(0, 0, 0, 0, DEADLINE);
     }
 
-    function test_RevertWhen_AddLiquidityWhenPaused() public {
+    function test_addLiquidity_whenPaused_reverts() public {
         app.pause();
         vm.prank(user);
         vm.expectRevert(ENFORCED_PAUSE);
         app.addLiquidity(1_000 ether, 0, 0, 0, DEADLINE);
     }
 
-    function testAddLiquidityEmitsEvent() public {
+    function test_addLiquidity_withValidAmount_emitsEvent() public {
         vm.expectEmit(true, true, true, false);
         emit SwapApp.AddLiquidity(user, address(usdt), address(dai), 0);
 
@@ -319,7 +319,7 @@ contract SwapAppTest is Test {
         app.addLiquidity(1_000 ether, 0, 0, 0, DEADLINE);
     }
 
-    function testAddLiquidityReturnsLeftovers() public {
+    function test_addLiquidity_withPartialFill_refundsLeftovers() public {
         // Deploy a new SwapApp backed by PartialMockV2Router
         PartialMockV2Router partialRouter = new PartialMockV2Router();
         SwapApp partialApp = new SwapApp(address(partialRouter), address(0xFAC7), address(usdt), address(dai));
